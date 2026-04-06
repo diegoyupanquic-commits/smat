@@ -1,11 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI # Importación del framework
 
-app = FastAPI(title="Ecosistema Digital UNMSM")
+app = FastAPI()
 
 @app.get("/")
-def read_root():
-    return {"message": "Bienvenido al Ecosistema Multiplataforma", "status": "online"}
-
-@app.get("/health")
-def health_check():
-    return {"check": "Servicios Cloud operativos"}
+async def root():
+    return {"status": "success", "plataforma": "UNMSM-FISI"}
