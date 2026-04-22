@@ -7,7 +7,29 @@ from database import engine, get_db
 # CRITICAL: Creación automática de la BD y tablas al iniciar
 models.Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="SMAT Persistente UNMSM")
+app = FastAPI(
+    title="SMAT - Sistema de Monitoreo de Alerta Temprana",
+    description="""
+    API robusta para la gestión y monitoreo de desastres naturales.
+    Permite la telemetría de sensores en tiempo real y el análisis de riesgos.
+    
+    **Entidades principales:**
+    * **Estaciones:** Puntos de monitoreo físico.
+    * **Lecturas:** Datos capturados por sensores.
+    * **Riesgos:** Análisis de criticidad basado en umbrales.
+    """,
+    version="1.2.0",
+    terms_of_service="http://unmsm.edu.pe/terms/",
+    contact={
+        "name": "Soporte Técnico SMAT - FISI",
+        "url": "http://fisi.unmsm.edu.pe",
+        "email": "desarrollo.smat@unmsm.edu.pe",
+    },
+    license_info={
+        "name": "Apache 2.0",
+        "url": "https://www.apache.org/licenses/LICENSE-2.0.html",
+    },
+)
 
 # --- Esquemas Pydantic ---
 class EstacionCreate(BaseModel):
@@ -21,7 +43,15 @@ class LecturaCreate(BaseModel):
 
 # --- Endpoints ---
 
-@app.post("/estaciones/", status_code=201)
+# --- Endpoints POST Modificados para Lab 4.2 ---
+
+@app.post(
+    "/estaciones/",
+    status_code=201,
+    tags=["Gestión de Infraestructura"],
+    summary="Registrar una nueva estación de monitoreo",
+    description="Inserta una estación física (ej. río, volcán, zona sísmica) en la base de datos relacional del sistema SMAT."
+)
 def crear_estacion(estacion: EstacionCreate, db: Session = Depends(get_db)):
     # Validar si ya existe
     existe = db.query(models.EstacionDB).filter(models.EstacionDB.id == estacion.id).first()
@@ -34,7 +64,14 @@ def crear_estacion(estacion: EstacionCreate, db: Session = Depends(get_db)):
     db.refresh(nueva_estacion)
     return {"msj": "Estación guardada en DB", "data": nueva_estacion}
 
-@app.post("/lecturas/", status_code=201)
+
+@app.post(
+    "/lecturas/",
+    status_code=201,
+    tags=["Telemetría de Sensores"],
+    summary="Registrar una nueva lectura de sensor",
+    description="Recibe un valor numérico y lo vincula a una estación existente. Si la estación no existe, devuelve un error 404."
+)
 def registrar_lectura(lectura: LecturaCreate, db: Session = Depends(get_db)):
     estacion = db.query(models.EstacionDB).filter(models.EstacionDB.id == lectura.estacion_id).first()
     if not estacion:
@@ -45,7 +82,23 @@ def registrar_lectura(lectura: LecturaCreate, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "Lectura guardada en DB"}
 
-@app.get("/estaciones/{id}/riesgo")
+# --- Endpoints GET Modificados (Laboratorio 4.2) ---
+
+@app.get(
+    "/estaciones/{id}/riesgo",
+    tags=["Análisis de Riesgo"],
+    summary="Evaluar nivel de riesgo actual",
+    description="""
+    Analiza la última lectura recibida de una estación para determinar su estado:
+    - **NORMAL**: Valor menor o igual a 10.0.
+    - **ALERTA**: Valor entre 10.1 y 20.0.
+    - **PELIGRO**: Valor superior a 20.0.
+    """,
+    responses={
+        200: {"description": "Cálculo de riesgo exitoso"},
+        404: {"description": "La estación no existe en la base de datos"}
+    }
+)
 def obtener_riesgo(id: int, db: Session = Depends(get_db)):
     estacion = db.query(models.EstacionDB).filter(models.EstacionDB.id == id).first()
     if not estacion:
@@ -65,14 +118,28 @@ def obtener_riesgo(id: int, db: Session = Depends(get_db)):
 
     return {"id": id, "valor": ultima_lectura, "nivel": nivel}
 
-# RETO LABORATIORIO 2 Y 3: Historial y Promedio desde SQL
-@app.get("/estaciones/{id}/historial")
+
+@app.get(
+    "/estaciones/{id}/historial",
+    tags=["Reportes Históricos"],
+    summary="Obtener historial estadístico de lecturas",
+    description="""
+    Este endpoint realiza una consulta SQL para recuperar todas las lecturas de una estación y calcula:
+    1. La lista completa de valores capturados.
+    2. El **conteo total** de registros.
+    3. El **promedio** aritmético redondeado a dos decimales.
+    """,
+    responses={
+        200: {"description": "Historial y promedio calculados correctamente"},
+        404: {"description": "ID de estación no encontrado"}
+    }
+)
 def historial_y_promedio(id: int, db: Session = Depends(get_db)):
     estacion = db.query(models.EstacionDB).filter(models.EstacionDB.id == id).first()
     if not estacion:
         raise HTTPException(status_code=404, detail="Estación no encontrada")
 
-    # Consulta SQL mediante SQLAlchemy
+    # Consulta mediante SQLAlchemy
     lecturas = db.query(models.LecturaDB).filter(models.LecturaDB.estacion_id == id).all()
     
     conteo = len(lecturas)
@@ -81,7 +148,7 @@ def historial_y_promedio(id: int, db: Session = Depends(get_db)):
     else:
         promedio = sum(l.valor for l in lecturas) / conteo
 
-    # Formateo de respuesta
+    # Formateo de respuesta profesional
     lista_lecturas = [{"id": l.id, "valor": l.valor} for l in lecturas]
 
     return {
