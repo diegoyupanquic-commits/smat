@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import models
@@ -82,14 +82,14 @@ def registrar_lectura(lectura: LecturaCreate, db: Session = Depends(get_db)):
     db.commit()
     return {"status": "Lectura guardada en DB"}
 
-# --- Endpoints GET Modificados (Laboratorio 4.2) ---
+# --- Endpoints GET Modificados e Inclusión del Reto (Laboratorio 4.2) ---
 
 @app.get(
     "/estaciones/{id}/riesgo",
     tags=["Análisis de Riesgo"],
     summary="Evaluar nivel de riesgo actual",
     description="""
-    Analiza la última lectura recibida de una estación para determinar su estado:
+    Analiza la última lectura recibida de una estación para determinar su estado crítico:
     - **NORMAL**: Valor menor o igual a 10.0.
     - **ALERTA**: Valor entre 10.1 y 20.0.
     - **PELIGRO**: Valor superior a 20.0.
@@ -109,13 +109,7 @@ def obtener_riesgo(id: int, db: Session = Depends(get_db)):
         return {"id": id, "nivel": "SIN DATOS", "valor": 0}
 
     ultima_lectura = lecturas[-1].valor
-    if ultima_lectura > 20.0:
-        nivel = "PELIGRO"
-    elif ultima_lectura > 10.0:
-        nivel = "ALERTA"
-    else:
-        nivel = "NORMAL"
-
+    nivel = "PELIGRO" if ultima_lectura > 20.0 else "ALERTA" if ultima_lectura > 10.0 else "NORMAL"
     return {"id": id, "valor": ultima_lectura, "nivel": nivel}
 
 
@@ -124,10 +118,10 @@ def obtener_riesgo(id: int, db: Session = Depends(get_db)):
     tags=["Reportes Históricos"],
     summary="Obtener historial estadístico de lecturas",
     description="""
-    Este endpoint realiza una consulta SQL para recuperar todas las lecturas de una estación y calcula:
-    1. La lista completa de valores capturados.
-    2. El **conteo total** de registros.
-    3. El **promedio** aritmético redondeado a dos decimales.
+    Realiza una consulta SQL para recuperar todas las lecturas de una estación y calcula:
+    1. **Lista de valores**: Historial completo de capturas.
+    2. **Conteo total**: Cantidad de registros en la base de datos.
+    3. **Promedio**: Media aritmética de los valores capturados (redondeado a 2 decimales).
     """,
     responses={
         200: {"description": "Historial y promedio calculados correctamente"},
@@ -139,16 +133,9 @@ def historial_y_promedio(id: int, db: Session = Depends(get_db)):
     if not estacion:
         raise HTTPException(status_code=404, detail="Estación no encontrada")
 
-    # Consulta mediante SQLAlchemy
     lecturas = db.query(models.LecturaDB).filter(models.LecturaDB.estacion_id == id).all()
-    
     conteo = len(lecturas)
-    if conteo == 0:
-        promedio = 0.0
-    else:
-        promedio = sum(l.valor for l in lecturas) / conteo
-
-    # Formateo de respuesta profesional
+    promedio = sum(l.valor for l in lecturas) / conteo if conteo > 0 else 0.0
     lista_lecturas = [{"id": l.id, "valor": l.valor} for l in lecturas]
 
     return {
@@ -156,4 +143,32 @@ def historial_y_promedio(id: int, db: Session = Depends(get_db)):
         "lecturas": lista_lecturas,
         "conteo": conteo,
         "promedio": round(promedio, 2)
+    }
+
+# --- PUNTO 2 DEL RETO: Auditoría de Críticos ---
+@app.get(
+    "/reportes/criticos",
+    tags=["Auditoría"],
+    summary="Filtrar lecturas que superan el umbral",
+    description="""
+    Filtra las lecturas en el sistema que superan un valor crítico. 
+    - **umbral**: Parámetro opcional. Si no se provee, el valor por defecto es 20.0.
+    """
+)
+def obtener_criticos(umbral: float = Query(20.0, description="Valor mínimo para filtrar"), db: Session = Depends(get_db)):
+    criticos = db.query(models.LecturaDB).filter(models.LecturaDB.valor > umbral).all()
+    return {"umbral_aplicado": umbral, "total": len(criticos), "datos": criticos}
+
+# --- PUNTO 3 DEL RETO: Stats / Resumen Ejecutivo ---
+@app.get(
+    "/estaciones/stats",
+    tags=["Auditoría"],
+    summary="Resumen ejecutivo del sistema",
+    description="Proporciona un conteo global de estaciones y lecturas totales registradas en el SMAT."
+)
+def obtener_stats(db: Session = Depends(get_db)):
+    return {
+        "total_estaciones": db.query(models.EstacionDB).count(),
+        "total_lecturas": db.query(models.LecturaDB).count(),
+        "mensaje": "Resumen consolidado de infraestructura"
     }
